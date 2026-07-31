@@ -46,8 +46,9 @@ spatially-connected regions with the Cauchy Combination Test (RW-MTCCT).
 
 ```
 Python/
-├── run_simulation.py      # 串行模拟主程序（对标 analysis_RWSPM.R）
+├── run_simulation.py      # 串行模拟主程序（对标 analysis_RWSPM_fixed.R）
 ├── run_simu_parallel.py   # 多核并行模拟主程序
+├── sensitivity.py         # 敏感性分析主程序（type I / power）
 ├── rwspm.py               # RWSPM 核心算法（分区、滑窗、CCT、RW-MTCCT）
 ├── bcov.py                # Ball Covariance 统计量与检验
 ├── gendata_xy.py          # 模拟数据生成（Setting 1–7）
@@ -61,7 +62,9 @@ Python/
 │   ├── cball_ext.dll / .so
 │   ├── compile_win.bat / compile_linux.sh
 │   └── *.c / *.h
-└── data/result/           # 模拟输出（见第 6 节）
+└── data/result/           # 模拟输出（见第 5 节）
+    ├── sensitivity.csv              # 敏感性分析汇总（type I / power）
+    ├── sensitivity_pvalues.csv      # 敏感性分析原始聚类 p 值
     └── Setting{k}/        # k = 1..7
         ├── test_rwspm{l}.csv         # 第 l 轮重复的逐区域结果
         └── rwspm_cluster_set{k}.csv  # 聚类级组合 p 值
@@ -171,6 +174,39 @@ python run_simu_parallel.py --window_width 0 --width_search single   # 单核 JS
 默认 21）、`--kde_bw`（固定 KDE 带宽，默认自动 bw.nrd0）、`--width_search`
 （JSD 自动选窗的并行模式：默认 `parallel` 并行 / `single` 单核，仅自动选窗时生效）。
 
+#### 4.6 `sensitivity.py` — 敏感性分析主程序
+
+基于 `run_simu_parallel.py` 的并行框架做**单变量敏感性分析**（每次只改变一个参数，
+其余固定在 baseline），评估各参数对 type I error 与 power 的影响：
+
+- `step`（`step_divisor`，步长 b = ceil(window_width/step_divisor)，默认 4，可取 2/4/8）
+- `n`（样本量）
+- `L`（`n_quantile`，LQD 分位插值点数）
+- `window`（`window_width`，移动窗宽，滑窗边长，像素）
+- `kde_bw`（KDE 带宽 h，`auto` = 自动 bw.nrd0）
+
+对每个 (参数, 取值, Setting) 组合运行 `n_rep` 轮重复，**只收集最终聚类 p 值**
+（不保存分 region 的 p 值），按 `p < threshold` 计算拒绝率：
+**Setting 1 → type I error，Setting 2–7 → power**。
+
+```bash
+python sensitivity.py                                  # 5 轴全部默认取值
+python sensitivity.py --step 2,4,8                     # 只分析 step（2/4/8）
+python sensitivity.py --n 100,200 --L 11,21,41         # 只分析 n 与 L
+python sensitivity.py --n_rep 100 --threshold 0.05     # 重复次数 / 显著性水平 α
+python sensitivity.py --rep_workers 4                  # 重复级并行
+python sensitivity.py --no_pvalues                     # 不保存原始 p 值
+python sensitivity.py --output_root data/result/sens   # 输出目录
+```
+
+输出（默认 `data/result/` 下）：
+- `sensitivity.csv`：汇总表 `setting, metric, axis, param_value, n_rep, reject_rate, mean_pvalue, se`；
+- `sensitivity_pvalues.csv`：原始聚类 p 值（每 rep 一行，`--no_pvalues` 时不生成）。
+
+种子固定为 `2026 + rep*7`（与主程序一致），同一 rep 在不同参数配置下使用相同
+数据，配置之间严格可比。默认 5 轴 × 7 个 Setting 计算量较大，建议先用单轴
+（如 `--step 2,4,8`）跑通再全量执行。
+
 ### 5. 输出结果说明（data 文件夹）
 
 运行结束后，每个 Setting 的结果存放在 `data/result/Setting{k}/` 下：
@@ -261,8 +297,9 @@ region 的统计量（第 2 列）与 p 值（第 3 列）；`Setting{k}/rwspm_c
 
 ```
 Python/
-├── run_simulation.py      # 串列模擬主程式（對標 analysis_RWSPM.R）
+├── run_simulation.py      # 串列模擬主程式（對標 analysis_RWSPM_fixed.R）
 ├── run_simu_parallel.py   # 多核心平行模擬主程式
+├── sensitivity.py         # 敏感性分析主程式（type I / power）
 ├── rwspm.py               # RWSPM 核心演算法（分割、滑窗、CCT、RW-MTCCT）
 ├── bcov.py                # Ball Covariance 統計量與檢定
 ├── gendata_xy.py          # 模擬資料生成（Setting 1–7）
@@ -274,6 +311,8 @@ Python/
 ├── example_rwspm.ipynb    # 範例 Notebook
 ├── cball_ext/             # C 擴充（加速 BDD 核矩陣，'limit' 方法需要）
 └── data/result/           # 模擬輸出（見第 5 節）
+    ├── sensitivity.csv              # 敏感性分析彙總（type I / power）
+    ├── sensitivity_pvalues.csv      # 敏感性分析原始叢集 p 值
     └── Setting{k}/        # k = 1..7
         ├── test_rwspm{l}.csv         # 第 l 輪重複的逐區域結果
         └── rwspm_cluster_set{k}.csv  # 叢集級組合 p 值
@@ -380,6 +419,39 @@ python run_simu_parallel.py --window_width 0 --width_search single   # 單核 JS
 預設 21）、`--kde_bw`（固定 KDE 頻寬，預設自動 bw.nrd0）、`--width_search`
 （JSD 自動選窗的平行模式：預設 `parallel` 平行 / `single` 單核，僅自動選窗時生效）。
 
+#### 4.6 `sensitivity.py` — 敏感性分析主程式
+
+基於 `run_simu_parallel.py` 的平行框架做**單變量敏感性分析**（每次只改變一個參數，
+其餘固定在 baseline），評估各參數對 type I error 與 power 的影響：
+
+- `step`（`step_divisor`，步長 b = ceil(window_width/step_divisor)，預設 4，可取 2/4/8）
+- `n`（樣本量）
+- `L`（`n_quantile`，LQD 分位插值點數）
+- `window`（`window_width`，移動窗寬，滑窗邊長，像素）
+- `kde_bw`（KDE 頻寬 h，`auto` = 自動 bw.nrd0）
+
+對每個 (參數, 取值, Setting) 組合執行 `n_rep` 輪重複，**只收集最終叢集 p 值**
+（不保存分 region 的 p 值），按 `p < threshold` 計算拒絕率：
+**Setting 1 → type I error，Setting 2–7 → power**。
+
+```bash
+python sensitivity.py                                  # 5 軸全部預設取值
+python sensitivity.py --step 2,4,8                     # 只分析 step（2/4/8）
+python sensitivity.py --n 100,200 --L 11,21,41         # 只分析 n 與 L
+python sensitivity.py --n_rep 100 --threshold 0.05     # 重複次數 / 顯著水準 α
+python sensitivity.py --rep_workers 4                  # 重複級平行
+python sensitivity.py --no_pvalues                     # 不保存原始 p 值
+python sensitivity.py --output_root data/result/sens   # 輸出目錄
+```
+
+輸出（預設 `data/result/` 下）：
+- `sensitivity.csv`：彙總表 `setting, metric, axis, param_value, n_rep, reject_rate, mean_pvalue, se`；
+- `sensitivity_pvalues.csv`：原始叢集 p 值（每 rep 一列，`--no_pvalues` 時不產生）。
+
+種子固定為 `2026 + rep*7`（與主程式一致），同一 rep 在不同參數配置下使用相同
+資料，配置之間嚴格可比。預設 5 軸 × 7 個 Setting 計算量較大，建議先用單軸
+（如 `--step 2,4,8`）跑通再全量執行。
+
 ### 5. 輸出結果說明（data 資料夾）
 
 每個 Setting 的結果存放在 `data/result/Setting{k}/` 下：
@@ -469,8 +541,9 @@ Pipeline (mirrors the R version `analysis_RWSPM_fixed.R`):
 
 ```
 Python/
-├── run_simulation.py      # Sequential simulation driver (port of analysis_RWSPM.R)
+├── run_simulation.py      # Sequential simulation driver (port of analysis_RWSPM_fixed.R)
 ├── run_simu_parallel.py   # Multi-core parallel simulation driver
+├── sensitivity.py         # Sensitivity analysis driver (type I error & power)
 ├── rwspm.py               # Core RWSPM algorithm (partition, sliding window, CCT, RW-MTCCT)
 ├── bcov.py                # Ball Covariance statistic and tests
 ├── gendata_xy.py          # Simulation data generator (Settings 1–7)
@@ -482,6 +555,8 @@ Python/
 ├── example_rwspm.ipynb    # Example notebook
 ├── cball_ext/             # C extension (accelerates BDD kernel, needed for 'limit')
 └── data/result/           # Simulation output (see Section 5)
+    ├── sensitivity.csv              # Sensitivity summary (type I / power)
+    ├── sensitivity_pvalues.csv      # Raw cluster p-values from sensitivity runs
     └── Setting{k}/        # k = 1..7
         ├── test_rwspm{l}.csv         # Per-region results of replication l
         └── rwspm_cluster_set{k}.csv  # Cluster-level combined p-values
@@ -594,6 +669,42 @@ search), `--step_divisor` (step = ceil(window_width/step_divisor), default 4),
 `--n_quantile` (LQD interpolation points, default 21), `--kde_bw` (fixed KDE
 bandwidth, default auto bw.nrd0), `--width_search` (JSD width-search mode when
 `window_width` is auto: `parallel` default / `single`).
+
+#### 4.6 `sensitivity.py` — Sensitivity Analysis Driver
+
+Built on top of the `run_simu_parallel.py` parallel framework, it performs
+**single-variable sensitivity analysis** (vary one parameter at a time, fix
+all others at a baseline) for the following parameters:
+
+- `step` (`step_divisor`, step b = ceil(window_width/step_divisor), default 4; e.g. 2/4/8)
+- `n` (sample size)
+- `L` (`n_quantile`, LQD quantile interpolation points)
+- `window` (`window_width`, moving window width, sliding-window side length)
+- `kde_bw` (KDE bandwidth h; `auto` = automatic bw.nrd0)
+
+For every (axis, value, setting) combination it runs `n_rep` replications and
+collects **only the final cluster p-values** (no per-region p-values are
+saved), then computes the rejection rate under `p < threshold`:
+**Setting 1 → type I error, Settings 2–7 → power**.
+
+```bash
+python sensitivity.py                                  # all 5 axes, default values
+python sensitivity.py --step 2,4,8                     # analyse step only (2/4/8)
+python sensitivity.py --n 100,200 --L 11,21,41         # analyse n and L only
+python sensitivity.py --n_rep 100 --threshold 0.05     # replications / significance level
+python sensitivity.py --rep_workers 4                  # replication-level parallelism
+python sensitivity.py --no_pvalues                     # skip raw p-value file
+python sensitivity.py --output_root data/result/sens   # output directory
+```
+
+Output (under `data/result/` by default):
+- `sensitivity.csv`: summary table `setting, metric, axis, param_value, n_rep, reject_rate, mean_pvalue, se`;
+- `sensitivity_pvalues.csv`: raw cluster p-values (one row per replication; not written with `--no_pvalues`).
+
+The seed per replication is fixed at `2026 + rep*7` (same as the main drivers),
+so the same replication uses identical data across configurations — results are
+strictly comparable. The default full run (5 axes × 7 Settings) is expensive;
+start with a single axis (e.g. `--step 2,4,8`) before running everything.
 
 ### 5. Output: How to Find the Statistic & p-value of Each Region in Each Loop
 
