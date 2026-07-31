@@ -17,6 +17,8 @@ Usage
     python run_simu_parallel.py --n_rep 10 --n_perm 20   # 快速测试
     python run_simu_parallel.py --n_workers 4            # 指定 worker 数
     python run_simu_parallel.py --rep_workers 2          # 重复级并行 worker 数
+    python run_simu_parallel.py --window_width 0         # 自动窗宽 (JSD) + 并行选窗
+    python run_simu_parallel.py --window_width 0 --width_search single  # 单核选窗
 """
 
 import os
@@ -24,6 +26,7 @@ import sys
 import time
 import argparse
 import warnings
+import functools
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
@@ -151,10 +154,12 @@ def _run_one_rep(args):
     args : tuple
         (setting, rep_id, M1, M2, n, window_width, step_divisor,
          n_quantile, kde_bw, method, n_perm, threshold,
-         n_workers, use_region_parallel)
+         n_workers, use_region_parallel, width_search)
 
         window_width : int or None
             If None (or 0), auto-select via JSD golden-section search.
+        width_search : str
+            "parallel" (default) or "single" — JSD window-width search mode.
         step_divisor : int
             Denominator for step size: b = ceil(window_width / step_divisor).
         n_quantile : int
@@ -170,7 +175,7 @@ def _run_one_rep(args):
     """
     (setting, rep_id, M1, M2, n, window_width, step_divisor,
      n_quantile, kde_bw, method, n_perm, threshold,
-     n_workers, use_region_parallel) = args
+     n_workers, use_region_parallel, width_search) = args
 
     result = {"rep_id": rep_id, "setting": setting, "status": "ok",
               "window_width": window_width}
@@ -183,10 +188,20 @@ def _run_one_rep(args):
         )
 
         # ---- Step 2: Image partition ----
-        # Auto window width via JSD golden-section search
+        # Auto window width via JSD golden-section search.
+        # width_search="parallel" (default) parallelises the sub-region loop
+        # inside compute_ov across n_workers processes; "single" keeps the
+        # original single-core behaviour.  The parallel mode is only used
+        # when region-level parallelism is active in the first place
+        # (parent process, or fork where nested pools are safe).
         if window_width is None or window_width <= 0:
+            if (width_search == "parallel" and use_region_parallel
+                    and n_workers > 1):
+                ov_fn = functools.partial(compute_ov, n_workers=n_workers)
+            else:
+                ov_fn = compute_ov
             window_width = golden_section_search(
-                y, compute_ov,
+                y, ov_fn,
                 a=2, b=int(np.ceil(min(M1, M2) / 2)),
                 M1=M1, M2=M2,
             )
@@ -255,7 +270,8 @@ def run_simulation_parallel(settings=None, n_rep=100, method="gamma",
                             n_workers=None, rep_workers=None,
                             n=200, M1=150, M2=100,
                             window_width=20, step_divisor=4,
-                            n_quantile=21, kde_bw=None):
+                            n_quantile=21, kde_bw=None,
+                            width_search="parallel"):
     """
     Run RWSPM simulation with multi-core parallelization.
 
@@ -294,6 +310,9 @@ def run_simulation_parallel(settings=None, n_rep=100, method="gamma",
         LQD interpolation points L (default 21).
     kde_bw : float or None
         Fixed KDE bandwidth. None → auto bw.nrd0 per sample.
+    width_search : str
+        JSD window-width search mode when window_width is auto:
+        "parallel" (default) or "single" (original single-core behaviour).
     """
     if settings is None:
         settings = list(range(1, 8))
@@ -319,8 +338,12 @@ def run_simulation_parallel(settings=None, n_rep=100, method="gamma",
         print(f"  Mode: region-level parallel ({effective_n_workers} workers)")
     else:
         print(f"  Mode: rep-level parallel ({rep_workers} workers, regions serial)")
+    if width_search == "parallel" and not use_region_parallel:
+        print("  Note: width_search=parallel falls back to single in "
+              "rep-level-parallel child processes (nested pools not allowed)")
     print(f"  Params: n={n}, M1={M1}, M2={M2}, "
           f"window_width={'auto' if window_width is None or window_width <= 0 else window_width}, "
+          f"width_search={width_search}, "
           f"step_divisor={step_divisor}, n_quantile={n_quantile}, "
           f"kde_bw={'auto' if kde_bw is None else kde_bw}")
     print()
@@ -340,6 +363,7 @@ def run_simulation_parallel(settings=None, n_rep=100, method="gamma",
                     n_quantile, kde_bw, method, n_perm, THRESHOLD,
                     effective_n_workers,
                     False,  # use_region_parallel = False in child processes
+                    width_search,
                 ))
 
         print(f"Submitting {len(rep_args)} replications "
@@ -398,7 +422,8 @@ def run_simulation_parallel(settings=None, n_rep=100, method="gamma",
                 (k, l, M1, M2, n, window_width, step_divisor,
                  n_quantile, kde_bw, method, n_perm, THRESHOLD,
                  effective_n_workers,
-                 True)   # use_region_parallel = True in parent process
+                 True,   # use_region_parallel = True in parent process
+                 width_search)
                 for l in range(1, n_rep + 1)
             ]
             rw_mtcct = np.zeros(n_rep)
@@ -499,7 +524,7 @@ if __name__ == "__main__":
         help="Image columns (default 100)."
     )
     parser.add_argument(
-        "--window_width", type=int, default=20,
+        "--window_width", type=int, default=-1,
         help="Sliding window width.  0 or negative → auto JSD search (default 20)."
     )
     parser.add_argument(
@@ -513,6 +538,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--kde_bw", type=float, default=None,
         help="Fixed KDE bandwidth.  Omit for auto bw.nrd0 (default)."
+    )
+    parser.add_argument(
+        "--width_search", type=str, default="parallel",
+        choices=["parallel", "single"],
+        help="JSD window-width search mode (only used when window_width is "
+             "auto): 'parallel' (default) parallelises compute_ov across "
+             "workers; 'single' keeps the original single-core behaviour.",
     )
     args = parser.parse_args()
 
@@ -531,4 +563,5 @@ if __name__ == "__main__":
         step_divisor=args.step_divisor,
         n_quantile=args.n_quantile,
         kde_bw=args.kde_bw,
+        width_search=args.width_search,
     )

@@ -4,12 +4,15 @@ Regional Window Selection via Partition Modeling (RWSPM).
 Reimplements the R functions from code_RWSPM/RWSPM.R and code_RWSPM/slide_width.R.
 """
 #%%---------------------------------------------------------------------------------------------
+import warnings
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+
 import numpy as np
 from scipy import stats
 from scipy.spatial.distance import cdist
 from scipy.stats import cauchy
 import networkx as nx
-import warnings
 
 from lqd import LQD
 from bcov import bcov
@@ -60,7 +63,55 @@ def jsd_from_kde_samples(dens_x, dens_y):
 #  Objective function for golden section search
 # ===========================================================================
 
-def compute_ov(y, window_width, M1, M2, n_grid=256):
+def _ov_region_jsd(sub_region, n_grid=256):
+    """
+    Mean pairwise Jensen-Shannon divergence within one sub-region.
+
+    Top-level helper so that :func:`compute_ov` can parallelise its
+    sub-region loop with a process pool.  Returns exactly the same value
+    as the original sequential loop body.
+
+    Parameters
+    ----------
+    sub_region : ndarray, shape (n_sam, width*width)
+        Pixel values of one sub-region for all samples.
+    n_grid : int, optional
+        Number of grid points for KDE (default 256).
+
+    Returns
+    -------
+    jsd_mean : float
+        Mean of the pairwise JSD matrix of this sub-region.
+    """
+    n_sam = sub_region.shape[0]
+
+    # Unified grid across all values in this sub-region
+    all_vals = sub_region.ravel()
+    grid = np.linspace(all_vals.min(), all_vals.max(), n_grid)
+
+    # KDE for each sample
+    prob_mat = np.zeros((n_sam, n_grid))
+    for i in range(n_sam):
+        kde = stats.gaussian_kde(sub_region[i, :])
+        prob_mat[i, :] = kde.evaluate(grid)
+        prob_mat[i, :] = prob_mat[i, :] / np.sum(prob_mat[i, :])
+
+    # JSD matrix (vectorised via broadcasting)
+    eps = 1e-10
+    P = np.tile(prob_mat, (n_sam, 1, 1))            # (n_sam, n_sam, n_grid)
+    Q = np.transpose(P, (1, 0, 2))
+    M = 0.5 * (P + Q) + eps
+    P = P + eps
+    Q = Q + eps
+
+    KL_PM = np.sum(P * np.log(P / M), axis=2)        # (n_sam, n_sam)
+    KL_QM = np.sum(Q * np.log(Q / M), axis=2)
+
+    jsd_matrix = 0.5 * (KL_PM + KL_QM)
+    return np.mean(jsd_matrix)
+
+
+def compute_ov(y, window_width, M1, M2, n_grid=256, n_workers=1):
     """
     Objective function: given a sliding window width *w*, compute mean(ov2).
 
@@ -78,6 +129,9 @@ def compute_ov(y, window_width, M1, M2, n_grid=256):
         Image width (number of columns).
     n_grid : int, optional
         Number of grid points for KDE (default 256).
+    n_workers : int, optional
+        Number of worker processes for the sub-region loop (default 1 =
+        single-core, i.e. the original sequential behaviour).
 
     Returns
     -------
@@ -91,36 +145,25 @@ def compute_ov(y, window_width, M1, M2, n_grid=256):
     sub_idx = idx1["idx"]
     m = sub_idx.shape[0]
 
-    ov2 = np.zeros(m)
-
-    for h in range(m):
-        col_idx = sub_idx[h, :].astype(int)
-        sub_region = y[:, col_idx]          # (n_sam, window_width)
-
-        # Unified grid across all values in this sub-region
-        all_vals = sub_region.ravel()
-        grid = np.linspace(all_vals.min(), all_vals.max(), n_grid)
-
-        # KDE for each sample
-        prob_mat = np.zeros((n_sam, n_grid))
-        for i in range(n_sam):
-            kde = stats.gaussian_kde(sub_region[i, :])
-            prob_mat[i, :] = kde.evaluate(grid)
-            prob_mat[i, :] = prob_mat[i, :] / np.sum(prob_mat[i, :])
-
-        # JSD matrix (vectorised via broadcasting)
-        eps = 1e-10
-        P = np.tile(prob_mat, (n_sam, 1, 1))            # (n_sam, n_sam, n_grid)
-        Q = np.transpose(P, (1, 0, 2))
-        M = 0.5 * (P + Q) + eps
-        P = P + eps
-        Q = Q + eps
-
-        KL_PM = np.sum(P * np.log(P / M), axis=2)        # (n_sam, n_sam)
-        KL_QM = np.sum(Q * np.log(Q / M), axis=2)
-
-        jsd_matrix = 0.5 * (KL_PM + KL_QM)
-        ov2[h] = np.mean(jsd_matrix)
+    if n_workers is None or n_workers <= 1 or m <= 1:
+        # --- Sequential path (original single-core behaviour) ---
+        ov2 = np.zeros(m)
+        for h in range(m):
+            col_idx = sub_idx[h, :].astype(int)
+            sub_region = y[:, col_idx]          # (n_sam, window_width)
+            ov2[h] = _ov_region_jsd(sub_region, n_grid)
+    else:
+        # --- Parallel path: sub-regions spread over a process pool ---
+        n_workers = int(min(n_workers, m))
+        region_gen = (
+            y[:, sub_idx[h, :].astype(int)]
+            for h in range(m)
+        )
+        with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            ov2 = np.array(list(pool.map(
+                partial(_ov_region_jsd, n_grid=n_grid),
+                region_gen,
+            )))
 
     ov_mean = np.mean(ov2)
     penalty = 0.6 * (window_width - 2) / (np.ceil(min(M1, M2) / 2) - 2)

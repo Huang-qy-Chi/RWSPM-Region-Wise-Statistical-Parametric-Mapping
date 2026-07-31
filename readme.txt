@@ -162,12 +162,14 @@ python run_simu_parallel.py --n_rep 10 --n_perm 20   # 快速测试
 python run_simu_parallel.py --n_workers 4            # 区域级 worker 数
 python run_simu_parallel.py --rep_workers 2          # 重复级并行（设置级）
 python run_simu_parallel.py --window_width 0         # 0/负 → 自动搜索窗宽
+python run_simu_parallel.py --window_width 0 --width_search single   # 单核 JSD 选窗
 ```
 
 灵敏度分析参数（额外）：`--n`（样本量，CLI 默认 50）、`--M1`/`--M2`（图像尺寸）、
 `--window_width`（滑窗宽度，默认 20，≤0 表示自动 JSD 搜索）、`--step_divisor`
 （步长 = ceil(window_width/step_divisor)，默认 4）、`--n_quantile`（LQD 插值点数，
-默认 21）、`--kde_bw`（固定 KDE 带宽，默认自动 bw.nrd0）。
+默认 21）、`--kde_bw`（固定 KDE 带宽，默认自动 bw.nrd0）、`--width_search`
+（JSD 自动选窗的并行模式：默认 `parallel` 并行 / `single` 单核，仅自动选窗时生效）。
 
 ### 5. 输出结果说明（data 文件夹）
 
@@ -234,7 +236,7 @@ region 的统计量（第 2 列）与 p 值（第 3 列）；`Setting{k}/rwspm_c
 - Windows 下 `run_simu_parallel.py` 的 `--rep_workers > 1` 时区域级并行自动关闭
   （避免嵌套进程池）；
 - 每轮重复的随机种子固定为 `random_state = 2026 + l * 7`，结果可复现；
-- 本实现对标 R 版 `analysis_RWSPM.R`，如需方法细节请参阅 RWSPM 论文。
+- 本实现对标 R 版 `analysis_RWSPM_fixed.R`，如需方法细节请参阅 RWSPM 论文。
 
 ---
 
@@ -369,12 +371,14 @@ python run_simu_parallel.py --n_rep 10 --n_perm 20   # 快速測試
 python run_simu_parallel.py --n_workers 4            # 區域級 worker 數
 python run_simu_parallel.py --rep_workers 2          # 重複級平行（設定級）
 python run_simu_parallel.py --window_width 0         # 0/負 → 自動搜尋窗寬
+python run_simu_parallel.py --window_width 0 --width_search single   # 單核 JSD 選窗
 ```
 
 靈敏度分析參數（額外）：`--n`（樣本量，CLI 預設 50）、`--M1`/`--M2`（影像尺寸）、
 `--window_width`（滑窗寬度，預設 20，≤0 表示自動 JSD 搜尋）、`--step_divisor`
 （步長 = ceil(window_width/step_divisor)，預設 4）、`--n_quantile`（LQD 插值點數，
-預設 21）、`--kde_bw`（固定 KDE 頻寬，預設自動 bw.nrd0）。
+預設 21）、`--kde_bw`（固定 KDE 頻寬，預設自動 bw.nrd0）、`--width_search`
+（JSD 自動選窗的平行模式：預設 `parallel` 平行 / `single` 單核，僅自動選窗時生效）。
 
 ### 5. 輸出結果說明（data 資料夾）
 
@@ -437,7 +441,7 @@ cl.iloc[9]["rw.mtcct"]     # 第 10 輪的叢集 p 值
 - `method='limit'` 需要已編譯的 `cball_ext`（DLL/SO），否則自動回退 `gamma`；
 - Windows 下 `--rep_workers > 1` 時區域級平行自動關閉（避免巢狀行程池）；
 - 每輪隨機種子固定為 `random_state = 2026 + l * 7`，結果可重現；
-- 本實作對標 R 版 `analysis_RWSPM.R`，方法細節請參閱 RWSPM 論文。
+- 本實作對標 R 版 `analysis_RWSPM_fixed.R`，方法細節請參閱 RWSPM 論文。
 
 ---
 
@@ -581,13 +585,15 @@ python run_simu_parallel.py --n_rep 10 --n_perm 20   # quick test
 python run_simu_parallel.py --n_workers 4            # region-level workers
 python run_simu_parallel.py --rep_workers 2          # rep-level parallelism
 python run_simu_parallel.py --window_width 0         # 0/negative → auto width search
+python run_simu_parallel.py --window_width 0 --width_search single  # single-core JSD search
 ```
 
 Extra sensitivity-analysis args: `--n` (sample size, CLI default 50),
 `--M1`/`--M2` (image size), `--window_width` (default 20; ≤0 → auto JSD
 search), `--step_divisor` (step = ceil(window_width/step_divisor), default 4),
 `--n_quantile` (LQD interpolation points, default 21), `--kde_bw` (fixed KDE
-bandwidth, default auto bw.nrd0).
+bandwidth, default auto bw.nrd0), `--width_search` (JSD width-search mode when
+`window_width` is auto: `parallel` default / `single`).
 
 ### 5. Output: How to Find the Statistic & p-value of Each Region in Each Loop
 
@@ -656,5 +662,5 @@ p-value of replication `l`.
   (avoids nested process pools);
 - The random seed per replication is fixed at `random_state = 2026 + l * 7`,
   so results are reproducible;
-- This is a Python port of R's `analysis_RWSPM.R`; see the RWSPM paper
+- This is a Python port of R's `analysis_RWSPM_fixed.R`; see the RWSPM paper
   for methodological details.
