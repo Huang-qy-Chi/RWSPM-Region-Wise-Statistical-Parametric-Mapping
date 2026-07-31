@@ -39,7 +39,7 @@ from gendata_xy import generate_data
 
 
 # ===========================================================================
-#  Constants (remaining)
+#  Constants (remaining), to select significant reigons for RW-MTCCT
 # ===========================================================================
 THRESHOLD = 0.05
 
