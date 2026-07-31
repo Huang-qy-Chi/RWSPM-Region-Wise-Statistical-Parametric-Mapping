@@ -234,7 +234,7 @@ region 的统计量（第 2 列）与 p 值（第 3 列）；`Setting{k}/rwspm_c
 - Windows 下 `run_simu_parallel.py` 的 `--rep_workers > 1` 时区域级并行自动关闭
   （避免嵌套进程池）；
 - 每轮重复的随机种子固定为 `random_state = 2026 + l * 7`，结果可复现；
-- 本实现对标 R 版 `analysis_RWSPM_fixed.R`，如需方法细节请参阅 RWSPM 论文。
+- 本实现对标 R 版 `analysis_RWSPM.R`，如需方法细节请参阅 RWSPM 论文。
 
 ---
 
@@ -437,7 +437,7 @@ cl.iloc[9]["rw.mtcct"]     # 第 10 輪的叢集 p 值
 - `method='limit'` 需要已編譯的 `cball_ext`（DLL/SO），否則自動回退 `gamma`；
 - Windows 下 `--rep_workers > 1` 時區域級平行自動關閉（避免巢狀行程池）；
 - 每輪隨機種子固定為 `random_state = 2026 + l * 7`，結果可重現；
-- 本實作對標 R 版 `analysis_RWSPM_fixed.R`，方法細節請參閱 RWSPM 論文。
+- 本實作對標 R 版 `analysis_RWSPM.R`，方法細節請參閱 RWSPM 論文。
 
 ---
 
@@ -656,5 +656,5 @@ p-value of replication `l`.
   (avoids nested process pools);
 - The random seed per replication is fixed at `random_state = 2026 + l * 7`,
   so results are reproducible;
-- This is a Python port of R's `analysis_RWSPM_fixed.R`; see the RWSPM paper
+- This is a Python port of R's `analysis_RWSPM.R`; see the RWSPM paper
   for methodological details.
