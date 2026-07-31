@@ -46,7 +46,7 @@ spatially-connected regions with the Cauchy Combination Test (RW-MTCCT).
 
 ```
 Python/
-├── run_simulation.py      # 串行模拟主程序（对标 analysis_RWSPM_fixed.R）
+├── run_simulation.py      # 串行模拟主程序（对标 analysis_RWSPM.R）
 ├── run_simu_parallel.py   # 多核并行模拟主程序
 ├── rwspm.py               # RWSPM 核心算法（分区、滑窗、CCT、RW-MTCCT）
 ├── bcov.py                # Ball Covariance 统计量与检验
@@ -261,7 +261,7 @@ region 的统计量（第 2 列）与 p 值（第 3 列）；`Setting{k}/rwspm_c
 
 ```
 Python/
-├── run_simulation.py      # 串列模擬主程式（對標 analysis_RWSPM_fixed.R）
+├── run_simulation.py      # 串列模擬主程式（對標 analysis_RWSPM.R）
 ├── run_simu_parallel.py   # 多核心平行模擬主程式
 ├── rwspm.py               # RWSPM 核心演算法（分割、滑窗、CCT、RW-MTCCT）
 ├── bcov.py                # Ball Covariance 統計量與檢定
@@ -469,7 +469,7 @@ Pipeline (mirrors the R version `analysis_RWSPM_fixed.R`):
 
 ```
 Python/
-├── run_simulation.py      # Sequential simulation driver (port of analysis_RWSPM_fixed.R)
+├── run_simulation.py      # Sequential simulation driver (port of analysis_RWSPM.R)
 ├── run_simu_parallel.py   # Multi-core parallel simulation driver
 ├── rwspm.py               # Core RWSPM algorithm (partition, sliding window, CCT, RW-MTCCT)
 ├── bcov.py                # Ball Covariance statistic and tests
