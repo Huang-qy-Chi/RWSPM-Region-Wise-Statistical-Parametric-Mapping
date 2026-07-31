@@ -1,4 +1,4 @@
-﻿"""
+"""
 Data generation functions for RWSPM simulation.
 
 Implements the simulation settings from the RWSPM paper:
@@ -11,15 +11,26 @@ Disease region A = [-10, 10] x [-10, 10]
 """
 
 import numpy as np
+from typing import Dict, TypedDict
 
-SETTINGS = {
-    1: dict(a=0.0, sigma_xy=0.0, sigma_r=0.0, model="independent"),
-    2: dict(a=1.0, sigma_xy=1.0, sigma_r=1.0, model="linear"),
-    3: dict(a=1.0, sigma_xy=2.0, sigma_r=1.0, model="linear"),
-    4: dict(a=1.0, sigma_xy=3.0, sigma_r=1.0, model="linear"),
-    5: dict(a=1.0, sigma_xy=1.0, sigma_r=1.0, model="nonlinear"),
-    6: dict(a=1.0, sigma_xy=2.0, sigma_r=1.0, model="nonlinear"),
-    7: dict(a=1.0, sigma_xy=3.0, sigma_r=1.0, model="nonlinear"),
+
+class _Setting(TypedDict):
+    """One simulation setting: numeric parameters plus the model name."""
+
+    a: float
+    sigma_xy: float
+    sigma_r: float
+    model: str
+
+
+SETTINGS: Dict[int, _Setting] = {
+    1: {"a": 0.0, "sigma_xy": 0.0, "sigma_r": 0.0, "model": "independent"},
+    2: {"a": 1.0, "sigma_xy": 1.0, "sigma_r": 1.0, "model": "linear"},
+    3: {"a": 1.0, "sigma_xy": 2.0, "sigma_r": 1.0, "model": "linear"},
+    4: {"a": 1.0, "sigma_xy": 3.0, "sigma_r": 1.0, "model": "linear"},
+    5: {"a": 1.0, "sigma_xy": 1.0, "sigma_r": 1.0, "model": "nonlinear"},
+    6: {"a": 1.0, "sigma_xy": 2.0, "sigma_r": 1.0, "model": "nonlinear"},
+    7: {"a": 1.0, "sigma_xy": 3.0, "sigma_r": 1.0, "model": "nonlinear"},
 }
 
 
