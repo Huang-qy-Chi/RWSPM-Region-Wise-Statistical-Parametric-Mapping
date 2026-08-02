@@ -327,7 +327,7 @@ if __name__ == "__main__":
                         help="Region-level workers (default cpu_count-1).")
     parser.add_argument("--rep_workers", type=int, default=None,
                         help="Rep-level workers (default 1).")
-    parser.add_argument("--width_search", type=str, default="single",
+    parser.add_argument("--width_search", type=str, default="parallel",
                         choices=["parallel", "single"],
                         help="JSD width-search mode (only relevant if a "
                              "window_width value <= 0 is given).")
