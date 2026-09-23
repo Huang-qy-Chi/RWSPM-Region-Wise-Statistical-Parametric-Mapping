@@ -1,4 +1,4 @@
-﻿"""
+"""
 Empirical Ball Covariance BCov^2_n(X, Y)
 
 Optimized with vectorized inner loops for speed.
@@ -17,20 +17,30 @@ warnings.filterwarnings("ignore")
 # ============================================================
 _CBALL: "ctypes.CDLL | None" = None
 _CBALL_LOADED = False
+_CBALL_ERROR: "str | None" = None
 
 
 def _load_cball():
-    global _CBALL, _CBALL_LOADED
+    global _CBALL, _CBALL_LOADED, _CBALL_ERROR
     if _CBALL_LOADED:
         return _CBALL is not None
 
     ext_dir = Path(__file__).parent / "cball_ext"
-    if (ext_dir / "cball_ext.dll").exists():
-        lib_path = str(ext_dir / "cball_ext.dll")
-    elif (ext_dir / "cball_ext.so").exists():
-        lib_path = str(ext_dir / "cball_ext.so")
-    else:
+    candidates = (["cball_ext.so", "cball_ext.dll"] if os.name != "nt"
+                  else ["cball_ext.dll", "cball_ext.so"])
+    lib_path = None
+    for name in candidates:
+        if (ext_dir / name).exists():
+            lib_path = str(ext_dir / name)
+            break
+    if lib_path is None:
         _CBALL_LOADED = True
+        _CBALL_ERROR = (
+            f"no compiled extension found in {ext_dir} "
+            f"(looked for: {', '.join(candidates)}). Compile it first:\n"
+            "  Linux:   cd cball_ext && bash compile_linux.sh   (needs gcc)\n"
+            "  Windows: cball_ext\\compile_win.bat"
+        )
         return False
 
     try:
@@ -51,10 +61,49 @@ def _load_cball():
         ]
         _CBALL = lib
         _CBALL_LOADED = True
+        _CBALL_ERROR = None
         return True
-    except Exception:
+    except Exception as e:
         _CBALL_LOADED = True
+        _CBALL_ERROR = (
+            f"found {lib_path} but ctypes failed to load it: {e!r}\n"
+            "Common causes on Linux:\n"
+            "  - compiled with -fopenmp but libgomp is not installed "
+            "(recompile WITHOUT -fopenmp)\n"
+            "  - .so was built for a different OS/arch (recompile on this machine)\n"
+            "  - missing runtime dependencies (check with: ldd cball_ext.so)"
+        )
         return False
+
+
+# ============================================================
+# Distance helpers
+# ============================================================
+
+# 因变量 Y 的距离 DY 可用的范数选项：'1' / '2' / 'inf'
+# （'2' 为默认，与原始 np.linalg.norm 默认的二范数行为一致）
+_NORM_ORD = {"1": 1, "2": 2, "inf": np.inf}
+
+
+def _pairwise_distance(A, norm="2"):
+    """
+    Pairwise distance matrix of the rows of ``A`` under the given norm.
+
+    Parameters
+    ----------
+    A : ndarray, shape (n, q)
+    norm : str
+        ``'1'``   — L1 (Manhattan) distance.
+        ``'2'``   — L2 (Euclidean) distance (default).
+        ``'inf'`` — L-infinity (Chebyshev / max-abs) distance.
+
+    Returns
+    -------
+    D : ndarray, shape (n, n)
+        Symmetric pairwise distance matrix (diagonal = 0).
+    """
+    ord = _NORM_ORD.get(norm, 2)
+    return np.linalg.norm(A[:, None, :] - A[None, :, :], axis=-1, ord=ord)
 
 
 # ============================================================
@@ -74,13 +123,14 @@ def _hbe(coeff, x):
     K3 = 8 * np.sum(coeff ** 3)
     nu = 8 * K2 ** 3 / K3 ** 2
     x_trans = np.sqrt(2 * nu / K2) * (x - K1) + nu
-    return 1.0 - stats.gamma.cdf(x_trans, a=nu / 2, scale=2)
+    # Avoid cancellation in the extreme upper tail.
+    return stats.gamma.sf(x_trans, a=nu / 2, scale=2)
 
 
 def _bdd_matrix_bias_c(D, weight='constant'):
     """Compute BDD kernel via C extension (cball_ext)."""
     if not _load_cball():
-        raise RuntimeError("cball_ext not found; compile first")
+        raise RuntimeError("cball_ext unavailable: " + (_CBALL_ERROR or "unknown reason"))
     n = D.shape[0]
     triu_idx = np.triu_indices(n, k=1)
     dist_vec = D[triu_idx].astype(np.float64, copy=True)
@@ -95,12 +145,31 @@ def _bdd_matrix_bias_c(D, weight='constant'):
                             ctypes.byref(n_val),
                             ctypes.byref(nth),
                             ctypes.byref(wt))
-    rows, cols = np.tril_indices(n)
+    # The C routine packs entries in row-wise upper-triangle order:
+    # (0,0), (0,1), ..., (0,n-1), (1,1), ... .  ``tril_indices`` permutes
+    # these entries and corrupts the eigenvalues used by method='limit'.
+    rows, cols = np.triu_indices(n)
     K = np.zeros((n, n))
     K[rows, cols] = out
     K = K + K.T
     np.fill_diagonal(K, np.diag(K) / 2)
     return K
+
+
+def diagnose_cball():
+    """Print why the C extension is (un)available on the current machine."""
+    global _CBALL_LOADED
+    _CBALL_LOADED = False
+    ok = _load_cball()
+    print("cball loaded:", ok)
+    print("reason:", _CBALL_ERROR)
+    ext_dir = Path(__file__).parent / "cball_ext"
+    print("ext_dir:", ext_dir)
+    print("ext_dir exists:", ext_dir.exists())
+    if ext_dir.exists():
+        for p in sorted(ext_dir.iterdir()):
+            print("   ", p.name, p.stat().st_size if p.is_file() else "<dir>")
+    return ok
 
 
 def _bcov_limit_pvalue(DX, DY, weight='constant'):
@@ -152,7 +221,7 @@ def _bcov_from_dm(DX, DY):
     return np.mean(diff ** 2)
 
 
-def bcov(X, Y):
+def bcov(X, Y, norm="2"):
     """
     Compute the empirical Ball Covariance statistic BCov^2_n(X, Y).
 
@@ -160,6 +229,9 @@ def bcov(X, Y):
     ----------
     X : ndarray, shape (n, p)
     Y : ndarray, shape (n, q)
+    norm : str
+        Norm used for the Y distance matrix DY: ``'1'``, ``'2'`` (default)
+        or ``'inf'``.  X always uses the Euclidean (L2) distance.
 
     Returns
     -------
@@ -170,14 +242,14 @@ def bcov(X, Y):
     Y = np.asarray(Y, dtype=float)
     n = X.shape[0]
 
-    # Euclidean distance matrices
-    DX = np.linalg.norm(X[:, None, :] - X[None, :, :], axis=-1)
-    DY = np.linalg.norm(Y[:, None, :] - Y[None, :, :], axis=-1)
+    # Distance matrices: X always L2; Y uses the selected norm
+    DX = _pairwise_distance(X, "2")
+    DY = _pairwise_distance(Y, norm)
 
     return _bcov_from_dm(DX, DY)
 
 
-def bcov_perm_test(x, y, n_perm=199, method='gamma', DY = None):
+def bcov_perm_test(x, y, n_perm=199, method='gamma', DY=None, norm='2'):
     """
     Ball Covariance permutation test.
 
@@ -191,7 +263,12 @@ def bcov_perm_test(x, y, n_perm=199, method='gamma', DY = None):
         ``'permu'`` — permutation p-value (default, matches original behaviour).
         ``'gamma'`` — Gamma approximation p-value using moment-matched Gamma
         distribution fitted to the permutation null distribution.
-    DY: Distance of Y, can insert to avoid repeated calculation
+    DY : ndarray, shape (n, n) or None
+        Distance matrix of Y; can insert to avoid repeated calculation.
+        If None it is computed here with the selected ``norm``.
+    norm : str
+        Norm used for the Y distance matrix DY: ``'1'``, ``'2'`` (default)
+        or ``'inf'``.  X always uses the Euclidean (L2) distance.
     Returns
     -------
     stat : float
@@ -208,11 +285,9 @@ def bcov_perm_test(x, y, n_perm=199, method='gamma', DY = None):
 
     # Precompute DY (stays the same for permutations)
     if DY is None:
-        DY = np.linalg.norm(y[:, None, :] - y[None, :, :], axis=-1)
-    else: 
-        DY = DY
+        DY = _pairwise_distance(y, norm)
     # Precompute full DX
-    DX = np.linalg.norm(x[:, None, :] - x[None, :, :], axis=-1)
+    DX = _pairwise_distance(x, "2")
 
     stat = _bcov_from_dm(DX, DY)
     perm_stats = np.zeros(n_perm)
